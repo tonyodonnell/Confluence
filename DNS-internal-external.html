@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWS DNS Resolution Flows</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d47;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #00ff88;
+    --accent4: #ffcc00;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --private: #7c3aed;
+    --public: #0891b2;
+    --aws: #ff9900;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #0a0e1a 0%, #0d1b2a 50%, #071a2e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 32px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -10%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(0,212,255,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .header-tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    opacity: 0.8;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 300;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 40px;
+    overflow-x: auto;
+  }
+
+  .tab {
+    padding: 14px 22px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .content { padding: 32px 40px; max-width: 1400px; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Section headers */
+  .section-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    margin-top: 32px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .badge-private { background: rgba(124,58,237,0.2); color: #a78bfa; border: 1px solid rgba(124,58,237,0.4); }
+  .badge-public { background: rgba(8,145,178,0.2); color: #67e8f9; border: 1px solid rgba(8,145,178,0.4); }
+  .badge-aws { background: rgba(255,153,0,0.15); color: #ffcc00; border: 1px solid rgba(255,153,0,0.3); }
+  .badge-resolver { background: rgba(0,255,136,0.1); color: #4ade80; border: 1px solid rgba(0,255,136,0.2); }
+
+  /* Flow diagrams */
+  .flow {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .flow::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+  }
+  .flow.internal::before { background: var(--private); }
+  .flow.external::before { background: var(--public); }
+  .flow.hybrid::before { background: linear-gradient(to bottom, var(--private), var(--public)); }
+
+  .flow-title {
+    font-weight: 700;
+    font-size: 16px;
+    color: #fff;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .flow-scenario {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+    background: var(--surface);
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  /* Step sequence */
+  .steps { display: flex; flex-direction: column; gap: 0; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 16px;
+    position: relative;
+  }
+
+  .step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 36px;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .step-num {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+    z-index: 1;
+    border: 2px solid;
+  }
+  .step-num.q { background: rgba(124,58,237,0.15); border-color: #7c3aed; color: #a78bfa; }
+  .step-num.r { background: rgba(0,255,136,0.1); border-color: #00ff88; color: #4ade80; }
+  .step-num.c { background: rgba(0,212,255,0.1); border-color: #00d4ff; color: #67e8f9; }
+  .step-num.n { background: rgba(255,153,0,0.1); border-color: #ff9900; color: #ffcc00; }
+
+  .step-body {
+    padding: 8px 0 24px;
+  }
+
+  .step-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .component-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+  }
+
+  .arrow-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    background: var(--surface);
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--accent);
+  }
+
+  .step-detail {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  .dns-packet {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+
+  .dns-packet span.label {
+    color: var(--muted);
+    font-size: 11px;
+    display: block;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .dns-packet .field {
+    display: flex;
+    gap: 16px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .dns-packet .field:last-child { border-bottom: none; }
+
+  .dns-packet .key { color: var(--accent2); min-width: 100px; }
+  .dns-packet .val { color: var(--accent3); }
+
+  /* Component reference grid */
+  .comp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+
+  .comp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    transition: border-color 0.2s;
+  }
+  .comp-card:hover { border-color: rgba(0,212,255,0.3); }
+
+  .comp-icon {
+    font-size: 24px;
+    margin-bottom: 10px;
+  }
+
+  .comp-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .comp-desc {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .comp-detail {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.1);
+    border-radius: 4px;
+    padding: 8px 10px;
+    line-height: 1.8;
+  }
+
+  /* Two-column layout */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* Decision table */
+  .decision-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .decision-table th {
+    background: var(--surface2);
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 12px 16px;
+    text-align: left;
+    border: 1px solid var(--border);
+  }
+  .decision-table td {
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .decision-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .decision-table .yes { color: #4ade80; }
+  .decision-table .no { color: #f87171; }
+  .decision-table .cond { color: #fbbf24; }
+
+  /* Info callout */
+  .callout {
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.2);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #94a3b8;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .callout-warn {
+    background: rgba(255,153,0,0.06);
+    border-color: rgba(255,153,0,0.25);
+  }
+  .callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .callout a { color: var(--accent); text-decoration: none; }
+
+  /* Port/protocol tags */
+  .proto-tag {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    font-weight: 600;
+  }
+  .udp { background: rgba(0,212,255,0.15); color: #67e8f9; }
+  .tcp { background: rgba(255,107,53,0.15); color: #fb923c; }
+
+  /* Architecture diagram (simplified) */
+  .arch-diagram {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+  }
+
+  .arch-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .arch-node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 16px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 120px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .arch-node .sub {
+    font-size: 10px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .arch-node.client { border-color: #64748b; color: #94a3b8; }
+  .arch-node.resolver { border-color: var(--accent3); color: #4ade80; }
+  .arch-node.private-hz { border-color: #7c3aed; color: #a78bfa; background: rgba(124,58,237,0.08); }
+  .arch-node.public-hz { border-color: #0891b2; color: #67e8f9; background: rgba(8,145,178,0.08); }
+  .arch-node.forwarder { border-color: var(--accent2); color: #fb923c; background: rgba(255,107,53,0.08); }
+  .arch-node.internet { border-color: #475569; color: #94a3b8; }
+  .arch-node.app { border-color: var(--aws); color: #ffcc00; background: rgba(255,153,0,0.08); }
+
+  .arch-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    color: var(--muted);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .arch-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .arch-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .divider-line {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 28px 0;
+  }
+
+  /* Conditional rules box */
+  .rule-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+
+  .rule-condition {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--accent4);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .rule-condition::before {
+    content: 'IF';
+    background: rgba(255,204,0,0.1);
+    border: 1px solid rgba(255,204,0,0.3);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+
+  .rule-then {
+    font-size: 13px;
+    color: var(--text);
+    padding-left: 16px;
+    border-left: 2px solid rgba(255,204,0,0.3);
+  }
+
+  /* Scroll anchor */
+  section[id] { scroll-margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-tag">AWS Architecture Reference</div>
+  <h1>DNS Resolution Flows</h1>
+  <div class="subtitle">Private &amp; Public Hosted Zones · Route 53 Resolver · Hybrid DNS · Component Handshaking</div>
+</div>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" onclick="showTab('overview')">Architecture Overview</div>
+  <div class="tab" onclick="showTab('internal')">Internal Access Flow</div>
+  <div class="tab" onclick="showTab('external')">External Access Flow</div>
+  <div class="tab" onclick="showTab('hybrid')">Hybrid (On-Prem) Flow</div>
+  <div class="tab" onclick="showTab('components')">Component Reference</div>
+  <div class="tab" onclick="showTab('decisions')">Decision Logic</div>
+</div>
+
+<!-- ============================================================ OVERVIEW -->
+<div class="content">
+<div class="panel active" id="panel-overview">
+
+  <p class="section-title">How DNS Resolution Works in AWS</p>
+
+  <div class="callout">
+    <span class="callout-icon">💡</span>
+    <div>The key to understanding AWS DNS is the <strong style="color:#fff">Route 53 Resolver</strong> — a built-in, highly available DNS service running at the <strong>VPC base IP + 2</strong> (e.g. <code style="font-family:'IBM Plex Mono',monospace;color:#67e8f9">10.0.0.2</code> in a <code style="font-family:'IBM Plex Mono',monospace;color:#67e8f9">10.0.0.0/16</code> VPC). Every DNS query from inside a VPC hits this resolver first. From there, the resolver decides whether to answer from a Private Hosted Zone, forward externally, or use Resolver Rules.</div>
+  </div>
+
+  <p class="section-title">Two Distinct DNS Universes</p>
+  <div class="two-col">
+    <div class="comp-card">
+      <div class="comp-name"><span style="color:#a78bfa">⬡</span> Private Hosted Zone (PHZ)<span class="badge badge-private">PRIVATE</span></div>
+      <div class="comp-desc">A DNS namespace that is only visible inside one or more associated VPCs. Records in here resolve to private IP addresses (RFC 1918). The outside internet cannot query or see these records.</div>
+      <div class="comp-detail">
+        Associated with: 1 or more VPCs<br>
+        Typical domain: app.internal, api.corp.local<br>
+        Record targets: Private IPs, ALBs, NLBs<br>
+        Split-horizon: Same name → different IP than public
+      </div>
+    </div>
+    <div class="comp-card">
+      <div class="comp-name"><span style="color:#67e8f9">⬡</span> Public Hosted Zone (PuHZ)<span class="badge badge-public">PUBLIC</span></div>
+      <div class="comp-desc">A DNS namespace registered on the global public internet. Any resolver worldwide can query it. Records typically point to public IPs, CloudFront, Load Balancers, or API Gateways.</div>
+      <div class="comp-detail">
+        Visible: Globally on the internet<br>
+        Typical domain: myapp.com, api.myapp.com<br>
+        Record targets: Public IPs, ELBs, CloudFront<br>
+        Split-horizon: Public IP returned for same name
+      </div>
+    </div>
+  </div>
+
+  <p class="section-title">Core Architecture Components</p>
+
+  <div class="arch-diagram">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:20px;letter-spacing:2px;text-transform:uppercase;">Internal Client Path</div>
+    <div class="arch-row" style="margin-bottom:24px;gap:0;">
+      <div class="arch-col">
+        <div class="arch-node client">EC2 / ECS<br>Lambda<div class="sub">VPC Client</div></div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node resolver">VPC Resolver<div class="sub">VPC_CIDR+2 :53</div></div>
+        <div class="arch-label">Route 53 Resolver</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node private-hz">Private<br>Hosted Zone<div class="sub">app.internal</div></div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node app">ALB / NLB<br>ECS / EC2<div class="sub">10.x.x.x</div></div>
+      </div>
+    </div>
+
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:20px;letter-spacing:2px;text-transform:uppercase;margin-top:8px;">External Client Path</div>
+    <div class="arch-row" style="gap:0;">
+      <div class="arch-col">
+        <div class="arch-node internet">Browser / App<div class="sub">External Client</div></div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node client">ISP / Public<br>Resolver<div class="sub">8.8.8.8 etc.</div></div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node public-hz">Public<br>Hosted Zone<div class="sub">myapp.com</div></div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-col">
+        <div class="arch-node app">CloudFront<br>ALB / AGW<div class="sub">1.2.3.4</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="section-title">Route 53 Resolver — Priority Decision Order</p>
+  <div class="callout callout-warn">
+    <span class="callout-icon">⚠️</span>
+    <div>The VPC Resolver applies rules in a strict priority order. <strong style="color:#fff">Resolver Rules always win over Hosted Zones</strong> when there's a match on the same domain. Understanding this prevents split-horizon surprises.</div>
+  </div>
+
+  <div class="rule-box">
+    <div class="rule-condition">Source IP is within an associated VPC AND query matches a Private Hosted Zone domain</div>
+    <div class="rule-then">✅ Answer from Private Hosted Zone — return private IP record. <em>Most specific match wins.</em></div>
+  </div>
+  <div class="rule-box">
+    <div class="rule-condition">A Resolver Rule (FORWARD type) matches the query domain</div>
+    <div class="rule-then">➡️ Forward to the specified DNS endpoint IP(s) (on-prem or custom DNS server). Resolver rules take priority over hosted zones for exact match domains.</div>
+  </div>
+  <div class="rule-box">
+    <div class="rule-condition">No Private Hosted Zone or Resolver Rule matches</div>
+    <div class="rule-then">🌐 Forward to Route 53 public resolver — will check Public Hosted Zone or recurse to authoritative internet DNS.</div>
+  </div>
+
+</div>
+
+<!-- ============================================================ INTERNAL FLOW -->
+<div class="panel" id="panel-internal">
+
+  <p class="section-title">Internal User — VPC-Based Client to Private Application</p>
+
+  <div class="callout">
+    <span class="callout-icon">🔒</span>
+    <div>This flow covers clients inside the VPC (EC2, ECS, Lambda in VPC, etc.) resolving to services using Private Hosted Zones. The entire DNS resolution happens within AWS infrastructure. DNS traffic never leaves the VPC via the internet.</div>
+  </div>
+
+  <!-- FLOW 1 -->
+  <div class="flow internal">
+    <div class="flow-title">
+      🏠 Flow 1: Internal Client → Private Application via PHZ
+      <span class="flow-scenario">api.app.internal → ALB private IP</span>
+    </div>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num q">1</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Application / OS DNS Stub Resolver</div>
+            <span class="arrow-label">DNS Query ↓</span>
+          </div>
+          <div class="step-detail">The application on EC2/ECS/Lambda calls <code style="font-family:'IBM Plex Mono',monospace">getaddrinfo("api.app.internal")</code> or equivalent. The OS stub resolver reads <code style="font-family:'IBM Plex Mono',monospace">/etc/resolv.conf</code> — which AWS pre-populates via DHCP to point to the VPC DNS Resolver.</div>
+          <div class="dns-packet">
+            <span class="label">DNS Query Packet</span>
+            <div class="field"><span class="key">QNAME</span><span class="val">api.app.internal.</span></div>
+            <div class="field"><span class="key">QTYPE</span><span class="val">A (IPv4) or AAAA (IPv6)</span></div>
+            <div class="field"><span class="key">QCLASS</span><span class="val">IN (Internet)</span></div>
+            <div class="field"><span class="key">Flags</span><span class="val">RD=1 (Recursion Desired)</span></div>
+            <div class="field"><span class="key">Dest IP</span><span class="val">VPC_CIDR + 2 (e.g. 10.0.0.2)</span></div>
+            <div class="field"><span class="key">Port</span><span class="val">53 <span class="proto-tag udp">UDP</span> (falls back to TCP if >512 bytes)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num c">2</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Route 53 Resolver (VPC DNS / AmazonProvidedDNS)</div>
+            <span class="arrow-label">Receives Query</span>
+          </div>
+          <div class="step-detail">The Route 53 Resolver (always at VPC base CIDR + 2) receives the query. It checks <strong style="color:#fff">in this order</strong>: (1) Is there a matching Resolver Rule? (2) Is there a Private Hosted Zone associated with this VPC that has a matching domain? Searches by longest label match — <code style="font-family:'IBM Plex Mono',monospace">api.app.internal</code> → tries full, then <code style="font-family:'IBM Plex Mono',monospace">app.internal</code>, then <code style="font-family:'IBM Plex Mono',monospace">internal</code>.</div>
+          <div class="dns-packet">
+            <span class="label">Resolver Decision Logic</span>
+            <div class="field"><span class="key">Check 1</span><span class="val">Resolver Rules (FORWARD / SYSTEM) — any match?</span></div>
+            <div class="field"><span class="key">Check 2</span><span class="val">Associated PHZs — does any PHZ match the domain suffix?</span></div>
+            <div class="field"><span class="key">Check 3</span><span class="val">VPC-scoped names (ec2.internal, compute.internal)</span></div>
+            <div class="field"><span class="key">Fallback</span><span class="val">Forward to Route 53 public resolver for external domains</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num r">3</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Route 53 — Private Hosted Zone: app.internal</div>
+            <span class="arrow-label">Zone Query</span>
+          </div>
+          <div class="step-detail">The resolver identifies the PHZ for <code style="font-family:'IBM Plex Mono',monospace">app.internal</code> is associated with the source VPC. It queries the PHZ for an A or ALIAS record matching <code style="font-family:'IBM Plex Mono',monospace">api.app.internal</code>. The PHZ returns the configured record — often an ALB DNS name (via ALIAS) or a direct private IP.</div>
+          <div class="dns-packet">
+            <span class="label">PHZ Record Lookup</span>
+            <div class="field"><span class="key">Zone</span><span class="val">app.internal (Private, VPC-associated)</span></div>
+            <div class="field"><span class="key">Record Name</span><span class="val">api.app.internal</span></div>
+            <div class="field"><span class="key">Record Type</span><span class="val">A record: 10.0.10.45 OR ALIAS → internal-alb-xxx.us-east-1.elb.amazonaws.com</span></div>
+            <div class="field"><span class="key">TTL</span><span class="val">300s (configurable; ALIAS inherits target TTL)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num r">4</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">ALIAS Resolution (if record is ALIAS type)</div>
+            <span class="arrow-label">Nested Lookup</span>
+          </div>
+          <div class="step-detail">If the PHZ record is an <strong style="color:#fff">ALIAS</strong> pointing to an internal ALB, Route 53 resolves the ALB's DNS name <em>within AWS infrastructure</em> and returns the current private IP(s) of the ALB nodes directly in the response. The client sees only an A record — the ALIAS chaining is invisible.</div>
+          <div class="dns-packet">
+            <span class="label">ALIAS Chain (Transparent)</span>
+            <div class="field"><span class="key">ALIAS Target</span><span class="val">internal-alb-1234.us-east-1.elb.amazonaws.com</span></div>
+            <div class="field"><span class="key">Resolved IPs</span><span class="val">10.0.10.45, 10.0.20.67 (ALB nodes in each AZ)</span></div>
+            <div class="field"><span class="key">Returned to client</span><span class="val">A record: 10.0.10.45 / 10.0.20.67 (multiple)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num r">5</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">DNS Response → Application</div>
+            <span class="arrow-label">Answer ↑</span>
+          </div>
+          <div class="step-detail">The Resolver returns the DNS response to the OS stub resolver, which caches it per TTL and returns the IP to the application. The application then opens a TCP connection to the returned private IP on the application port. The packet flows <strong style="color:#fff">entirely within the VPC</strong> — no internet gateway involved.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FLOW 2: Split Horizon -->
+  <div class="flow internal">
+    <div class="flow-title">
+      🔀 Flow 2: Split-Horizon DNS (Same Domain, Different IP Inside vs Outside)
+      <span class="flow-scenario">api.myapp.com resolves differently inside VPC</span>
+    </div>
+    <div class="callout" style="margin:0 0 20px;">
+      <span class="callout-icon">💡</span>
+      <div>Split-horizon allows the same domain name to return a <em>private IP</em> when queried from inside the VPC and a <em>public IP</em> when queried from the internet. You create a PHZ with the <strong style="color:#fff">same domain name</strong> as the Public Hosted Zone and associate it with the VPC.</div>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num q">1</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">VPC Client queries api.myapp.com</div></div>
+          <div class="step-detail">Same query: <code style="font-family:'IBM Plex Mono',monospace">api.myapp.com A?</code> sent to VPC Resolver at VPC+2.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num c">2</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">VPC Resolver checks: PHZ associated with this VPC for myapp.com?</div><span class="arrow-label">PHZ wins!</span></div>
+          <div class="step-detail">A Private Hosted Zone named <code style="font-family:'IBM Plex Mono',monospace">myapp.com</code> IS associated with this VPC. The resolver queries it — ignoring the public zone entirely. The VPC association creates a "shadow" over the public zone for clients in this VPC.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num r">3</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">PHZ returns private record</div></div>
+          <div class="dns-packet">
+            <span class="label">PHZ Response (Inside VPC)</span>
+            <div class="field"><span class="key">api.myapp.com</span><span class="val">A → 10.0.10.45 (internal ALB)</span></div>
+          </div>
+          <div class="dns-packet" style="margin-top:8px;">
+            <span class="label">PuHZ Response (Outside VPC — what internet sees)</span>
+            <div class="field"><span class="key">api.myapp.com</span><span class="val">A → 52.12.44.1 (public ALB / CloudFront)</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================ EXTERNAL FLOW -->
+<div class="panel" id="panel-external">
+
+  <p class="section-title">External User — Internet Client to Public Application</p>
+
+  <div class="callout">
+    <span class="callout-icon">🌐</span>
+    <div>External users have no access to Private Hosted Zones. Their queries travel through the global public DNS hierarchy, hitting Route 53's public name servers as the authoritative source for your domain.</div>
+  </div>
+
+  <div class="flow external">
+    <div class="flow-title">
+      🌍 Flow 3: External Browser → Public App via Public Hosted Zone
+      <span class="flow-scenario">api.myapp.com → CloudFront / Public ALB</span>
+    </div>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num q">1</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Browser / External Client DNS Stub Resolver</div>
+            <span class="arrow-label">DNS Query ↓</span>
+          </div>
+          <div class="step-detail">User types <code style="font-family:'IBM Plex Mono',monospace">https://api.myapp.com</code>. Browser checks local OS cache, then sends query to the OS stub resolver, which checks its own cache and forwards to the configured recursive resolver (ISP's resolver, 8.8.8.8, 1.1.1.1, etc.).</div>
+          <div class="dns-packet">
+            <span class="label">Initial Query from Client</span>
+            <div class="field"><span class="key">QNAME</span><span class="val">api.myapp.com.</span></div>
+            <div class="field"><span class="key">QTYPE</span><span class="val">A</span></div>
+            <div class="field"><span class="key">Dest</span><span class="val">Client's configured recursive resolver (e.g. 8.8.8.8:53)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num c">2</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Recursive Resolver (ISP / Public — e.g. Google 8.8.8.8)</div>
+            <span class="arrow-label">Cache Check → Recurse</span>
+          </div>
+          <div class="step-detail">The recursive resolver checks its cache. On a miss, it starts the <strong style="color:#fff">iterative resolution process</strong>: queries a Root DNS server to find the authoritative server for <code style="font-family:'IBM Plex Mono',monospace">.com</code>.</div>
+          <div class="dns-packet">
+            <span class="label">Root Server Query (if no cache)</span>
+            <div class="field"><span class="key">Queries</span><span class="val">Root Servers (a-m.root-servers.net)</span></div>
+            <div class="field"><span class="key">Asks</span><span class="val">Who is authoritative for .com?</span></div>
+            <div class="field"><span class="key">Response</span><span class="val">REFERRAL → .com TLD servers (e.g. a.gtld-servers.net)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num c">3</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">.com TLD Name Servers (Verisign)</div>
+            <span class="arrow-label">NS Delegation</span>
+          </div>
+          <div class="step-detail">The recursive resolver queries the <code style="font-family:'IBM Plex Mono',monospace">.com</code> TLD servers asking about <code style="font-family:'IBM Plex Mono',monospace">myapp.com</code>. The TLD servers return an NS delegation referral pointing to Route 53's name servers (which you set when creating the Public Hosted Zone or registering the domain).</div>
+          <div class="dns-packet">
+            <span class="label">TLD Referral Response</span>
+            <div class="field"><span class="key">ANSWER</span><span class="val">REFERRAL (no direct answer)</span></div>
+            <div class="field"><span class="key">NS Records</span><span class="val">ns-123.awsdns-45.com</span></div>
+            <div class="field"><span class="key">NS Records</span><span class="val">ns-456.awsdns-67.net</span></div>
+            <div class="field"><span class="key">NS Records</span><span class="val">ns-789.awsdns-01.org</span></div>
+            <div class="field"><span class="key">NS Records</span><span class="val">ns-1234.awsdns-78.co.uk</span></div>
+            <div class="field"><span class="key">Glue Records</span><span class="val">A records for NS servers included</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num r">4</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Route 53 Public Name Servers (Authoritative)</div>
+            <span class="arrow-label">Authoritative Answer</span>
+          </div>
+          <div class="step-detail">The recursive resolver queries Route 53's authoritative name servers for <code style="font-family:'IBM Plex Mono',monospace">api.myapp.com</code>. Route 53 looks up the <strong style="color:#fff">Public Hosted Zone</strong> for <code style="font-family:'IBM Plex Mono',monospace">myapp.com</code> and returns the matching record. If it's an ALIAS to CloudFront or ALB, Route 53 resolves that and returns A records directly.</div>
+          <div class="dns-packet">
+            <span class="label">Route 53 PuHZ Authoritative Response</span>
+            <div class="field"><span class="key">Zone</span><span class="val">myapp.com (Public Hosted Zone)</span></div>
+            <div class="field"><span class="key">Record</span><span class="val">api.myapp.com ALIAS → dXXX.cloudfront.net</span></div>
+            <div class="field"><span class="key">Resolved</span><span class="val">A: 52.84.xx.xx, 52.84.yy.yy (CloudFront edge IPs)</span></div>
+            <div class="field"><span class="key">TTL</span><span class="val">300s (or lower for ALIAS)</span></div>
+            <div class="field"><span class="key">AA Flag</span><span class="val">1 (Authoritative Answer)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num r">5</div>
+        <div class="step-body">
+          <div class="step-header">
+            <div class="component-name">Recursive Resolver → Client Response</div>
+            <span class="arrow-label">Answer ↑</span>
+          </div>
+          <div class="step-detail">The recursive resolver caches the result and returns the A record(s) to the client. The client OS caches the result (respecting TTL) and the browser opens a TCP connection (and TLS handshake for HTTPS) to the returned IP — a <strong style="color:#fff">CloudFront edge node</strong> nearest to the user.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Latency / Geo routing -->
+  <div class="flow external">
+    <div class="flow-title">
+      🎯 Flow 4: Route 53 Health Checks &amp; Routing Policies
+      <span class="flow-scenario">Weighted / Geo / Failover at DNS layer</span>
+    </div>
+    <div class="callout" style="margin:0 0 16px;">
+      <span class="callout-icon">💡</span>
+      <div>Route 53 routing policies affect which record is returned by the authoritative name server at step 4 above. This is pure DNS-layer traffic steering — no proxy involved.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">
+      <div class="rule-box" style="margin:0">
+        <div class="rule-condition" style="font-size:11px;">Routing Policy: LATENCY</div>
+        <div class="rule-then">Route 53 returns the record for the AWS region with lowest measured latency to the client's resolver IP.</div>
+      </div>
+      <div class="rule-box" style="margin:0">
+        <div class="rule-condition" style="font-size:11px;">Routing Policy: GEO</div>
+        <div class="rule-then">Route 53 maps resolver IP to geography, returns record for the matching geographic region.</div>
+      </div>
+      <div class="rule-box" style="margin:0">
+        <div class="rule-condition" style="font-size:11px;">Routing Policy: FAILOVER</div>
+        <div class="rule-then">Route 53 health checks target endpoint. If unhealthy, automatically returns secondary record. Failover is near real-time.</div>
+      </div>
+      <div class="rule-box" style="margin:0">
+        <div class="rule-condition" style="font-size:11px;">Routing Policy: WEIGHTED</div>
+        <div class="rule-then">Route 53 returns records in proportion to assigned weights — useful for canary deployments and blue/green.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================ HYBRID FLOW -->
+<div class="panel" id="panel-hybrid">
+
+  <p class="section-title">Hybrid DNS — On-Premises to AWS and AWS to On-Premises</p>
+
+  <div class="callout">
+    <span class="callout-icon">🔗</span>
+    <div>Hybrid DNS uses <strong style="color:#fff">Route 53 Resolver Endpoints</strong> — ENIs deployed into your VPC subnets that act as DNS entry/exit points over Direct Connect or VPN. This allows on-prem clients to resolve Private Hosted Zone records, and VPC workloads to resolve on-prem DNS.</div>
+  </div>
+
+  <!-- Inbound: On-prem → AWS -->
+  <div class="flow hybrid">
+    <div class="flow-title">
+      ⬅️ Flow 5: On-Premises Client → AWS Private Hosted Zone (Inbound Endpoint)
+      <span class="flow-scenario">on-prem server resolves api.app.internal</span>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num q">1</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">On-Premises DNS Server (e.g. Windows DNS / BIND)</div><span class="arrow-label">Conditional Forwarder</span></div>
+          <div class="step-detail">On the on-premises DNS server, a <strong style="color:#fff">Conditional Forwarder</strong> is configured: for any query ending in <code style="font-family:'IBM Plex Mono',monospace">.app.internal</code>, forward to the Route 53 Resolver Inbound Endpoint IP addresses (deployed in your VPC subnets). The on-prem server sends the DNS query over Direct Connect / VPN to those IPs.</div>
+          <div class="dns-packet">
+            <span class="label">On-Prem Conditional Forward</span>
+            <div class="field"><span class="key">Condition</span><span class="val">*.app.internal</span></div>
+            <div class="field"><span class="key">Forward-To IPs</span><span class="val">10.0.1.200, 10.0.2.200 (Inbound Endpoint ENIs)</span></div>
+            <div class="field"><span class="key">Transport</span><span class="val">UDP/TCP :53 over DX or VPN tunnel</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num c">2</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">Route 53 Resolver Inbound Endpoint</div><span class="arrow-label">Receives from On-Prem</span></div>
+          <div class="step-detail">The Inbound Endpoint is a set of ENIs (minimum 2, one per AZ for HA) created via Route 53 Resolver. They receive the DNS query from on-premises over the private network connection. The ENI IPs are <strong style="color:#fff">static</strong> and you configure them as targets in your on-prem conditional forwarder.</div>
+          <div class="dns-packet">
+            <span class="label">Inbound Endpoint Specs</span>
+            <div class="field"><span class="key">Type</span><span class="val">INBOUND (accepts queries from outside VPC)</span></div>
+            <div class="field"><span class="key">ENIs</span><span class="val">2+ ENIs across 2+ AZs in designated subnets</span></div>
+            <div class="field"><span class="key">Security Group</span><span class="val">Allow inbound UDP/TCP 53 from on-prem CIDR</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num r">3</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">Route 53 Resolver → Private Hosted Zone</div><span class="arrow-label">PHZ Lookup</span></div>
+          <div class="step-detail">The query is now inside the VPC DNS resolution path. The resolver checks associated PHZs — finds <code style="font-family:'IBM Plex Mono',monospace">app.internal</code> — and returns the private A record for <code style="font-family:'IBM Plex Mono',monospace">api.app.internal</code>.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num r">4</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">Response travels back to On-Prem DNS Server → Client</div></div>
+          <div class="step-detail">The private IP is returned over the DX/VPN link back to the on-prem DNS server, which forwards it to the on-prem client. The client can now connect to the private IP (reachable via DX/VPN routing).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Outbound: VPC → On-Prem -->
+  <div class="flow hybrid">
+    <div class="flow-title">
+      ➡️ Flow 6: VPC Client → On-Premises DNS (Outbound Endpoint + Resolver Rule)
+      <span class="flow-scenario">EC2 resolves server.corp.local (on-prem hostname)</span>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num q">1</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">EC2 Instance queries server.corp.local</div></div>
+          <div class="step-detail">Query goes to VPC Resolver at VPC+2 as normal.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num c">2</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">Route 53 Resolver checks Resolver Rules</div><span class="arrow-label">FORWARD rule match</span></div>
+          <div class="step-detail">A <strong style="color:#fff">Resolver Rule</strong> of type <code style="font-family:'IBM Plex Mono',monospace">FORWARD</code> is configured in Route 53: for <code style="font-family:'IBM Plex Mono',monospace">corp.local</code>, forward to the on-prem DNS server IPs. The Resolver Rule is <strong style="color:#fff">associated with the VPC</strong>. The rule matches — query is forwarded.</div>
+          <div class="dns-packet">
+            <span class="label">Resolver Rule Configuration</span>
+            <div class="field"><span class="key">Rule Type</span><span class="val">FORWARD</span></div>
+            <div class="field"><span class="key">Domain</span><span class="val">corp.local</span></div>
+            <div class="field"><span class="key">Target IPs</span><span class="val">192.168.10.53, 192.168.20.53 (on-prem DNS)</span></div>
+            <div class="field"><span class="key">VPC Association</span><span class="val">Associated with this VPC</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num c">3</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">Route 53 Resolver Outbound Endpoint</div><span class="arrow-label">Sends to On-Prem</span></div>
+          <div class="step-detail">The Outbound Endpoint is another set of ENIs (2+ AZs). The Resolver sends the forwarded query from the Outbound Endpoint ENI IPs out over the DX/VPN connection to the on-prem DNS server IPs specified in the Resolver Rule.</div>
+          <div class="dns-packet">
+            <span class="label">Outbound Endpoint</span>
+            <div class="field"><span class="key">Type</span><span class="val">OUTBOUND (sends queries to external DNS)</span></div>
+            <div class="field"><span class="key">Source IP</span><span class="val">Outbound ENI IP (e.g. 10.0.3.100)</span></div>
+            <div class="field"><span class="key">Dest</span><span class="val">192.168.10.53:53 (on-prem DNS)</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num r">4</div>
+        <div class="step-body">
+          <div class="step-header"><div class="component-name">On-Premises DNS returns answer → EC2</div></div>
+          <div class="step-detail">On-prem DNS resolves <code style="font-family:'IBM Plex Mono',monospace">server.corp.local</code> → <code style="font-family:'IBM Plex Mono',monospace">192.168.5.10</code>. Response travels back through Outbound Endpoint → VPC Resolver → EC2. EC2 connects to on-prem server over DX/VPN.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================ COMPONENTS -->
+<div class="panel" id="panel-components">
+
+  <p class="section-title">DNS Component Reference</p>
+
+  <div class="comp-grid">
+
+    <div class="comp-card">
+      <div class="comp-name">Route 53 Resolver <span class="badge badge-resolver">VPC Built-In</span></div>
+      <div class="comp-desc">The invisible DNS server always present in every VPC at <strong>VPC_CIDR + 2</strong>. Handles all intra-VPC DNS resolution. Checks PHZs, Resolver Rules, and forwards to public DNS if no match.</div>
+      <div class="comp-detail">
+        Address: VPC_CIDR + 2 (e.g. 10.0.0.2)<br>
+        Also: 169.254.169.253 (link-local)<br>
+        Port: UDP/TCP 53<br>
+        Managed by AWS — no config needed to use
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">Private Hosted Zone (PHZ) <span class="badge badge-private">PRIVATE</span></div>
+      <div class="comp-desc">A DNS zone only resolvable from associated VPCs. Supports all standard record types (A, AAAA, CNAME, MX, TXT, SRV) plus AWS-specific ALIAS records.</div>
+      <div class="comp-detail">
+        Scope: VPC-scoped (association required)<br>
+        ALIAS: Points to AWS resources (ALB, CF, etc.)<br>
+        Cross-account: Share PHZ via RAM<br>
+        Split-horizon: Create PHZ with same name as public zone
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">Public Hosted Zone (PuHZ) <span class="badge badge-public">PUBLIC</span></div>
+      <div class="comp-desc">Authoritative DNS for a domain on the internet. Route 53 assigns 4 name servers across different TLDs for resilience. Delegate your domain registrar's NS records here.</div>
+      <div class="comp-detail">
+        NS servers: 4 assigned (different TLDs)<br>
+        Global anycast: R53 has 100+ edge PoPs<br>
+        DNSSEC: Supported for signed zones<br>
+        Health checks: Integrated routing policies
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">Resolver Inbound Endpoint <span class="badge badge-resolver">HYBRID</span></div>
+      <div class="comp-desc">ENIs in VPC subnets that accept DNS queries from on-premises networks (via DX or VPN). On-prem DNS servers forward specific domains to these IP addresses.</div>
+      <div class="comp-detail">
+        Min: 2 ENIs across 2 AZs<br>
+        Static IPs: Stable for forwarder config<br>
+        Security Group: Allow UDP/TCP 53 from on-prem<br>
+        Cost: Per ENI per hour + per query
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">Resolver Outbound Endpoint <span class="badge badge-resolver">HYBRID</span></div>
+      <div class="comp-desc">ENIs in VPC subnets that Route 53 Resolver uses to send forwarded DNS queries OUT to external DNS servers (on-prem, custom DNS). Used in conjunction with Resolver Rules.</div>
+      <div class="comp-detail">
+        Min: 2 ENIs across 2 AZs<br>
+        Source IPs: Add to on-prem firewall allow list<br>
+        Security Group: Allow outbound UDP/TCP 53<br>
+        Paired with: FORWARD Resolver Rules
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">Resolver Rules <span class="badge badge-resolver">ROUTING</span></div>
+      <div class="comp-desc">Per-VPC routing rules for DNS queries. FORWARD rules send matching domains to specified IPs via Outbound Endpoint. SYSTEM rules override forwarding to use local resolution.</div>
+      <div class="comp-detail">
+        Types: FORWARD, SYSTEM, RECURSIVE<br>
+        Priority: FORWARD rules > PHZ (for exact match)<br>
+        Scope: Associated per VPC<br>
+        Share: Via AWS RAM to other accounts
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">ALIAS Records <span class="badge badge-aws">AWS-SPECIFIC</span></div>
+      <div class="comp-desc">AWS-specific pseudo-record type. Like CNAME but works at zone apex (naked domain). Route 53 automatically resolves the target and returns A/AAAA records, so no extra DNS round-trip for client.</div>
+      <div class="comp-detail">
+        Supported targets: ALB, NLB, CloudFront, S3 website, API GW, Elastic IP, Global Accelerator, another R53 record<br>
+        TTL: Inherited from target<br>
+        Free: No charge for ALIAS queries to AWS resources
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-name">VPC DNS Settings <span class="badge badge-aws">VPC CONFIG</span></div>
+      <div class="comp-desc">Two VPC attributes control DNS behavior and must both be enabled for Private Hosted Zones and hostname resolution to work correctly.</div>
+      <div class="comp-detail">
+        enableDnsSupport: Must = true<br>
+        (enables VPC Resolver at VPC+2)<br>
+        enableDnsHostnames: Must = true<br>
+        (enables EC2 public/private hostnames)<br>
+        Check: AWS Console → VPC → DNS settings
+      </div>
+    </div>
+
+  </div>
+
+  <p class="section-title">Record Type Quick Reference</p>
+  <table class="decision-table">
+    <tr>
+      <th>Record Type</th>
+      <th>Use Case</th>
+      <th>PHZ Supported</th>
+      <th>PuHZ Supported</th>
+      <th>Notes</th>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">A</code></td>
+      <td>IPv4 address</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Most common; point to private or public IP</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">AAAA</code></td>
+      <td>IPv6 address</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Required for dual-stack apps</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">CNAME</code></td>
+      <td>Canonical name alias</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Cannot be used at zone apex (use ALIAS instead)</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">ALIAS</code></td>
+      <td>AWS-resource alias</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Works at apex; free for AWS resource targets</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">MX</code></td>
+      <td>Mail routing</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Priority + mail server hostname</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">TXT</code></td>
+      <td>Text / verification</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>SPF, DKIM, ACM validation, domain verification</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">SRV</code></td>
+      <td>Service discovery</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>Priority, weight, port, target</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">NS</code></td>
+      <td>Name server delegation</td>
+      <td class="cond">Limited</td>
+      <td class="yes">✓</td>
+      <td>PuHZ: auto-created apex NS; PHZ: subdomain delegation</td>
+    </tr>
+    <tr>
+      <td><code style="font-family:'IBM Plex Mono',monospace">PTR</code></td>
+      <td>Reverse DNS</td>
+      <td class="yes">✓</td>
+      <td class="yes">✓</td>
+      <td>In-addr.arpa zones; for reverse lookup of private IPs</td>
+    </tr>
+  </table>
+
+</div>
+
+<!-- ============================================================ DECISIONS -->
+<div class="panel" id="panel-decisions">
+
+  <p class="section-title">DNS Resolution Decision Logic — Which Component Answers?</p>
+
+  <div class="callout callout-warn">
+    <span class="callout-icon">🧭</span>
+    <div>Use this section to determine which DNS path will be taken for a given query scenario. The decision is determined by: (1) where the client is located, (2) VPC DNS settings, (3) Resolver Rule matches, (4) PHZ associations, (5) domain type.</div>
+  </div>
+
+  <p class="section-title" style="margin-top:24px">Client Location Decision Tree</p>
+
+  <table class="decision-table">
+    <tr>
+      <th>Client Location</th>
+      <th>Query Domain</th>
+      <th>Resolver Used</th>
+      <th>Zone Checked</th>
+      <th>Record Returned</th>
+    </tr>
+    <tr>
+      <td>Inside VPC (EC2, ECS, Lambda)</td>
+      <td>*.app.internal (matches PHZ)</td>
+      <td>VPC Resolver (VPC+2)</td>
+      <td>Private Hosted Zone</td>
+      <td>Private IP / ALB DNS</td>
+    </tr>
+    <tr>
+      <td>Inside VPC</td>
+      <td>api.myapp.com (PHZ exists for myapp.com)</td>
+      <td>VPC Resolver (VPC+2)</td>
+      <td>Private Hosted Zone (split-horizon)</td>
+      <td>Private IP (internal ALB)</td>
+    </tr>
+    <tr>
+      <td>Inside VPC</td>
+      <td>api.myapp.com (no PHZ for myapp.com)</td>
+      <td>VPC Resolver → R53 Public</td>
+      <td>Public Hosted Zone</td>
+      <td>Public IP / CloudFront</td>
+    </tr>
+    <tr>
+      <td>Inside VPC</td>
+      <td>*.corp.local (FORWARD Resolver Rule)</td>
+      <td>VPC Resolver → Outbound Endpoint → On-Prem DNS</td>
+      <td>On-Prem DNS</td>
+      <td>On-prem IP</td>
+    </tr>
+    <tr>
+      <td>Inside VPC</td>
+      <td>ec2-*.compute.internal</td>
+      <td>VPC Resolver (VPC+2)</td>
+      <td>VPC internal (auto)</td>
+      <td>EC2 private IP</td>
+    </tr>
+    <tr>
+      <td>On-Premises</td>
+      <td>*.app.internal (conditional forwarder set)</td>
+      <td>On-Prem DNS → Inbound Endpoint → VPC Resolver</td>
+      <td>Private Hosted Zone</td>
+      <td>Private IP (over DX/VPN)</td>
+    </tr>
+    <tr>
+      <td>Internet / External</td>
+      <td>api.myapp.com</td>
+      <td>ISP Recursive → Root → TLD → R53 Authoritative</td>
+      <td>Public Hosted Zone</td>
+      <td>Public IP / CloudFront</td>
+    </tr>
+    <tr>
+      <td>Internet / External</td>
+      <td>*.app.internal</td>
+      <td>ISP Recursive → (no route to PHZ)</td>
+      <td>None (NXDOMAIN or no answer)</td>
+      <td class="no">NXDOMAIN — not resolvable</td>
+    </tr>
+  </table>
+
+  <hr class="divider-line">
+
+  <p class="section-title">Common Gotchas &amp; Troubleshooting Decisions</p>
+
+  <div class="two-col">
+    <div>
+      <div class="rule-box">
+        <div class="rule-condition">PHZ not resolving from within VPC</div>
+        <div class="rule-then">Check: <code style="font-family:'IBM Plex Mono',monospace">enableDnsSupport=true</code> AND <code style="font-family:'IBM Plex Mono',monospace">enableDnsHostnames=true</code> on VPC. Check: PHZ is associated with the VPC. Check: Security groups/NACLs don't block UDP 53 to VPC+2.</div>
+      </div>
+      <div class="rule-box">
+        <div class="rule-condition">VPC peering and PHZ resolution fails</div>
+        <div class="rule-then">A PHZ is not automatically shared across peered VPCs. You must explicitly <strong>associate the PHZ with the peered VPC</strong> (even cross-account). This is a common oversight.</div>
+      </div>
+      <div class="rule-box">
+        <div class="rule-condition">CNAME fails at zone apex (e.g. myapp.com)</div>
+        <div class="rule-then">DNS spec prohibits CNAME at apex. Use an <strong>ALIAS record</strong> instead — it works at apex and supports ALB, CloudFront, API GW, etc.</div>
+      </div>
+    </div>
+    <div>
+      <div class="rule-box">
+        <div class="rule-condition">On-prem cannot resolve PHZ names</div>
+        <div class="rule-then">Requires: (1) Resolver Inbound Endpoint deployed in VPC, (2) On-prem DNS configured with conditional forwarder pointing to Inbound Endpoint IPs, (3) Network path open (DX/VPN), (4) Security group allows UDP/TCP 53 from on-prem IP range.</div>
+      </div>
+      <div class="rule-box">
+        <div class="rule-condition">Resolver Rule takes priority when NOT expected</div>
+        <div class="rule-then">FORWARD Resolver Rules take priority over PHZs for same-domain matches. If a Resolver Rule for <code style="font-family:'IBM Plex Mono',monospace">myapp.com</code> exists, it will override a PHZ for the same domain. Remove/adjust the Resolver Rule, or use SYSTEM type to bypass forwarding.</div>
+      </div>
+      <div class="rule-box">
+        <div class="rule-condition">DNS latency / caching issues during deployment</div>
+        <div class="rule-then">Set low TTLs (60s) before changes, change the record, wait, then raise TTL back. ALIAS records inherit their target's TTL — ALB TTL is typically 60s. R53 health-check-based failover responds within 10–30s depending on health check interval.</div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider-line">
+
+  <p class="section-title">Port &amp; Protocol Reference</p>
+  <table class="decision-table">
+    <tr>
+      <th>Path</th>
+      <th>Protocol</th>
+      <th>Port</th>
+      <th>When TCP used?</th>
+    </tr>
+    <tr>
+      <td>App → VPC Resolver</td>
+      <td><span class="proto-tag udp">UDP</span></td>
+      <td>53</td>
+      <td>Response &gt;512 bytes, or EDNS0 not supported</td>
+    </tr>
+    <tr>
+      <td>VPC Resolver → PHZ / PuHZ</td>
+      <td>Internal AWS (no exposed port)</td>
+      <td>N/A</td>
+      <td>Handled entirely within AWS infrastructure</td>
+    </tr>
+    <tr>
+      <td>On-prem DNS → Inbound Endpoint</td>
+      <td><span class="proto-tag udp">UDP</span> / <span class="proto-tag tcp">TCP</span></td>
+      <td>53</td>
+      <td>Zone transfers, large responses</td>
+    </tr>
+    <tr>
+      <td>Outbound Endpoint → On-prem DNS</td>
+      <td><span class="proto-tag udp">UDP</span> / <span class="proto-tag tcp">TCP</span></td>
+      <td>53</td>
+      <td>Same as above</td>
+    </tr>
+    <tr>
+      <td>External Recursive → R53 Authoritative</td>
+      <td><span class="proto-tag udp">UDP</span></td>
+      <td>53</td>
+      <td>DNSSEC responses (larger), zone transfers</td>
+    </tr>
+  </table>
+
+</div>
+</div><!-- end content -->
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>
